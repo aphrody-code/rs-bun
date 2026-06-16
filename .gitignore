@@ -1,0 +1,4 @@
+# Nothing to build here — skills are plain md/sh/ts. Keep the repo clean.
+node_modules/
+*.log
+.DS_Store

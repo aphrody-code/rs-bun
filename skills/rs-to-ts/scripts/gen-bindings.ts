@@ -1,0 +1,166 @@
+#!/usr/bin/env bun
+/**
+ * gen-bindings.ts — generate a typed bun:ffi binding from a declarative manifest.
+ *
+ * Usage:  bun gen-bindings.ts <manifest.ts> [out.ts]
+ *
+ * The manifest is a TS module whose default export matches `Manifest` below.
+ * Declaring symbols once and generating the `dlopen` block keeps the JS `args`
+ * in lockstep with the Rust signatures — hand-written blocks drift and crash.
+ */
+
+/** FFIType names that are valid JS identifiers (so we can emit `FFIType.<name>`). */
+export type FFITypeName =
+  | "i8" | "u8" | "i16" | "u16" | "i32" | "u32"
+  | "i64" | "u64" | "i64_fast" | "u64_fast"
+  | "f32" | "f64" | "bool" | "char"
+  | "ptr" | "cstring" | "buffer" | "function" | "void";
+
+export interface SymbolSpec {
+  args: FFITypeName[];
+  returns: FFITypeName;
+  /** Returned `ptr` is an owned C string: wrap in CString and free it. */
+  string?: boolean;
+  /** Name of the Rust free fn for `string` symbols (default "free_string"). */
+  free?: string;
+}
+
+export interface Manifest {
+  /** Library base name; resolves to `lib<lib>.<suffix>` (underscores). */
+  lib: string;
+  profile?: "debug" | "release";
+  symbols: Record<string, SymbolSpec>;
+}
+
+const VALID = new Set<FFITypeName>([
+  "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "i64_fast",
+  "u64_fast", "f32", "f64", "bool", "char", "ptr", "cstring", "buffer",
+  "function", "void",
+]);
+
+/** TS type for a value coming OUT of native (return position). */
+function tsReturn(t: FFITypeName): string {
+  switch (t) {
+    case "void": return "void";
+    case "bool": return "boolean";
+    case "cstring": return "string";
+    case "i64": case "u64": return "bigint";
+    case "i64_fast": case "u64_fast": return "number | bigint";
+    default: return "number"; // ints, floats, ptr
+  }
+}
+
+/** TS type for a value going INTO native (argument position). */
+function tsArg(t: FFITypeName): string {
+  switch (t) {
+    case "bool": return "boolean";
+    // cstring accepts a JS string for convenience — the wrapper encodes it.
+    case "cstring": return "string | number | ArrayBufferView";
+    case "ptr": return "number | ArrayBufferView";
+    case "buffer": return "ArrayBufferView";
+    case "function": return "JSCallback | number";
+    case "i64": case "u64": case "i64_fast": case "u64_fast":
+      return "number | bigint";
+    default: return "number";
+  }
+}
+
+function validate(m: Manifest): void {
+  if (!m.lib || typeof m.lib !== "string") throw new Error("manifest.lib missing");
+  for (const [name, s] of Object.entries(m.symbols)) {
+    for (const a of s.args) {
+      if (!VALID.has(a)) throw new Error(`${name}: invalid arg type "${a}"`);
+    }
+    if (!VALID.has(s.returns)) throw new Error(`${name}: invalid return type "${s.returns}"`);
+    if (s.string && s.returns !== "ptr") {
+      throw new Error(`${name}: string:true requires returns:"ptr" (got "${s.returns}")`);
+    }
+  }
+}
+
+export function generate(m: Manifest): string {
+  validate(m);
+  const profile = m.profile ?? "release";
+
+  // Collect every dlopen symbol: declared ones + the free fns string-symbols need.
+  const dlopen: Record<string, SymbolSpec> = {};
+  for (const [name, s] of Object.entries(m.symbols)) {
+    dlopen[name] = { args: s.args, returns: s.returns };
+    if (s.string) {
+      const free = s.free ?? "free_string";
+      dlopen[free] = { args: ["ptr"], returns: "void" };
+    }
+  }
+
+  const symLines = Object.entries(dlopen)
+    .map(([name, s]) => {
+      const args = s.args.map((a) => `FFIType.${a}`).join(", ");
+      return `  ${name}: { args: [${args}], returns: FFIType.${s.returns} },`;
+    })
+    .join("\n");
+
+  // Ergonomic wrappers.
+  const wrappers = Object.entries(m.symbols)
+    .map(([name, s]) => {
+      const params = s.args.map((a, i) => `a${i}: ${tsArg(a)}`).join(", ");
+      // A JS string passed to a `cstring` arg must be encoded to a
+      // NUL-terminated buffer — bun:ffi rejects raw strings as pointers.
+      const coercions = s.args
+        .map((a, i) =>
+          a === "cstring"
+            ? `  const _a${i} = typeof a${i} === "string" ? Buffer.from(a${i} + "\\0", "utf8") : a${i};`
+            : null,
+        )
+        .filter(Boolean)
+        .join("\n");
+      const call = s.args
+        .map((a, i) => (a === "cstring" ? `_a${i}` : `a${i}`))
+        .join(", ");
+      const prelude = coercions ? coercions + "\n" : "";
+      if (s.string) {
+        const free = s.free ?? "free_string";
+        return `export function ${name}(${params}): string {
+${prelude}  const p = lib.symbols.${name}(${call}) as number;
+  try { return new CString(p).toString(); }
+  finally { lib.symbols.${free}(p); }
+}`;
+      }
+      const ret = tsReturn(s.returns);
+      const body =
+        s.returns === "void"
+          ? `lib.symbols.${name}(${call});`
+          : `return lib.symbols.${name}(${call}) as ${ret};`;
+      return `export function ${name}(${params}): ${ret} {
+${prelude}  ${body}
+}`;
+    })
+    .join("\n\n");
+
+  return `// AUTO-GENERATED by gen-bindings.ts from the FFI manifest. Do not edit.
+import { dlopen, FFIType, suffix, CString, JSCallback } from "bun:ffi";
+
+const lib = dlopen(
+  \`\${import.meta.dir}/target/${profile}/lib${m.lib.replace(/-/g, "_")}.\${suffix}\`,
+  {
+${symLines}
+  },
+);
+
+export const close = lib.close;
+
+${wrappers}
+`;
+}
+
+if (import.meta.main) {
+  const manifestPath = Bun.argv[2];
+  if (!manifestPath) {
+    console.error("usage: bun gen-bindings.ts <manifest.ts> [out.ts]");
+    process.exit(1);
+  }
+  const out = Bun.argv[3] ?? "bindings.generated.ts";
+  const mod = await import(require("path").resolve(manifestPath));
+  const code = generate(mod.default as Manifest);
+  await Bun.write(out, code);
+  console.error(`wrote ${out}`);
+}

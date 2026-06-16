@@ -1,0 +1,26 @@
+{
+  "name": "rs-bun",
+  "version": "0.1.0",
+  "description": "Connect Rust and Bun end-to-end: bun:ffi bindings, napi-rs native addons, the Rust↔Bun reference, and crate→Bun-package workflows.",
+  "author": {
+    "name": "Yohan Pierre"
+  },
+  "license": "MIT",
+  "keywords": [
+    "rust",
+    "bun",
+    "ffi",
+    "napi",
+    "napi-rs",
+    "cdylib",
+    "native-addon",
+    "n-api",
+    "dlopen",
+    "wasm",
+    "webassembly",
+    "wasm-bindgen"
+  ],
+  "agents": [
+    "./agents/bun-rs.md"
+  ]
+}

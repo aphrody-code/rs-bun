@@ -1,0 +1,45 @@
+{
+  "name": "bun-rs",
+  "owner": {
+    "name": "aphrody-code"
+  },
+  "plugins": [
+    {
+      "name": "rs-bun",
+      "source": "./",
+      "description": "Connect Rust and Bun end-to-end: bun:ffi bindings, napi-rs native addons, Rust→WASM (wasm-bindgen), the Rust↔Bun reference, and crate→Bun-package workflows. 5 skills + the bun-rs agent.",
+      "author": {
+        "name": "aphrody-code"
+      },
+      "license": "MIT",
+      "keywords": [
+        "rust",
+        "bun",
+        "ffi",
+        "napi-rs",
+        "wasm-bindgen",
+        "native-addon"
+      ]
+    },
+    {
+      "name": "bun-agent",
+      "source": {
+        "source": "github",
+        "repo": "aphrody-code/n2b"
+      },
+      "description": "Bun-native agent suite co-located with the n2b Node→Bun migration CLI (Rust). 23 agents, 9 skills, the n2b binary, session/memory hooks.",
+      "author": {
+        "name": "aphrody-code"
+      },
+      "license": "MIT",
+      "keywords": [
+        "bun",
+        "n2b",
+        "node-to-bun",
+        "migration",
+        "agent",
+        "rust"
+      ]
+    }
+  ]
+}
