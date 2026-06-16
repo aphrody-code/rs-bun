@@ -1,5 +1,6 @@
 {
   "name": "bun-rs",
+  "description": "Rust ↔ Bun: bun:ffi / napi-rs / wasm-bindgen skills (rs-bun) and the n2b Node→Bun migration agent suite (bun-agent).",
   "owner": {
     "name": "aphrody-code"
   },
